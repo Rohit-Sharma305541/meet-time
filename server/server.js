@@ -5,9 +5,7 @@ const cors = require("cors")
 const twilio = require("twilio")
 
 const PORT = process.env.PORT ||  5000
-
 const app = express()
-
 const server = http.createServer(app)
  app.use(cors())
 
@@ -55,6 +53,14 @@ io.on('connection', (socket)=> {
 
    socket.on('disconnect', ()=> {
       disconnectHandler(socket)
+   })
+
+   socket.on('conn-signal', data => {
+      signalingHandler(data, socket)
+   })
+
+   socket.on('conn-init', data => {
+      initializeConnectionHandler(data, socket)
    })
 
    socket.on("leave",()=>{
@@ -123,6 +129,18 @@ const joinRoomHandler = (data, socket)=> {
    //add new user to connected user array
    connectedUsers = [...connectedUsers, newUser]
 
+   //emit to all users which are already in this room to prepare peer connection
+   room.connectedUsers.forEach( user => {
+      if(user.socketId!== socket.id){
+         const data = {
+            connUserSocketId : socket.id
+         }
+         io.to(user.socketId).emit("conn-prepare", data);
+      }
+
+      
+   })
+
    io.to(roomId).emit("room-update", {connectedUsers: room.connectedUsers})
 
 }
@@ -146,6 +164,10 @@ const disconnectHandler = (socket)=> {
 
       //close the room if no user is connected
       if(room.connectedUsers.length> 0){
+         //emit to all users which are still in the room that the user has disconnected
+         io.to(room.id).emit('user-disconnected',{socketId:socket.id})
+
+         //emit an event to the rest of the users which left in the room new connectedUsers in room
          io.to(room.id).emit("room-update", {
            connectedUsers: room.connectedUsers,
          });
@@ -153,6 +175,23 @@ const disconnectHandler = (socket)=> {
          rooms = rooms.filter((r)=> r.id!== room.id)
       }
    }
+}
+
+const signalingHandler = (data, socket)=> {
+   const {connUserSocketId, signal} = data
+
+   const signalingData = {signal, connUserSocketId: socket.id}
+   io.to(connUserSocketId).emit('conn-signal', signalingData)
+   console.log('signaling handler server side')
+}
+
+//info from clients which are already in room that they have prepared for the incoming connection
+const initializeConnectionHandler = (data, socket)=> {
+   console.log("initialize new connection on server")
+   const {connUserSocketId} = data
+
+   const initData = { connUserSocketId: socket.id}
+   io.to(connUserSocketId).emit('conn-init', initData)
 }
 
  server.listen(PORT,()=>{
